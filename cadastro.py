@@ -1,4 +1,5 @@
 import os
+from datetime import datetime, timedelta
 import psycopg2
 
 try:
@@ -68,8 +69,9 @@ def cadastrar_usuario(user: str, email: str, senha: str):
 
         # Insere estatísticas iniciais (zeradas) vinculadas ao usuário
         comando_stats = (
-            'INSERT INTO speech_teach.stats (id_usuario, sequencia, estrelas, precisao, frases, melhor_precisao, data_entrada) '
-            'VALUES (%s, %s, %s, %s, %s, %s, CURRENT_DATE)'
+            'INSERT INTO speech_teach.stats '
+            '(id_usuario, sequencia, estrelas, precisao, frases, melhor_precisao, data_entrada, data_ultimo_login) '
+            'VALUES (%s, %s, %s, %s, %s, %s, CURRENT_DATE, CURRENT_DATE)'
         )
         valores_stats = (user_id, 0, 0, 0.0, 0, 0.0)
         cursor.execute(comando_stats, valores_stats)
@@ -101,11 +103,13 @@ def cadastrar_usuario(user: str, email: str, senha: str):
 def autenticar_usuario(email: str, senha: str):
     """
     Autentica um usuário pelo email e senha.
+    Atualiza o streak de acordo com a última data de login.
     Retorna um dicionário com id e name se sucesso.
     Levanta ValueError se credenciais inválidas.
     """
     conexao = None
     cursor = None
+    committed = False
     
     try:
         print(f"[LOGIN] Tentando autenticar usuário: {email}")
@@ -114,6 +118,7 @@ def autenticar_usuario(email: str, senha: str):
         if conexao is None:
             raise Exception('Não foi possível conectar ao banco')
 
+        conexao.autocommit = False
         cursor = conexao.cursor()
         
         comando = 'SELECT id, nome, senha FROM speech_teach.usuarios WHERE email = %s'
@@ -126,10 +131,18 @@ def autenticar_usuario(email: str, senha: str):
         if resultado[2] != (senha or '').strip():
             raise ValueError('Senha incorreta')
         
-        print(f'[LOGIN] ✓ Usuário {resultado[1]} autenticado com sucesso!')
+        user_id = resultado[0]
+        user_name = resultado[1]
+        
+        # Atualiza o streak
+        _atualizar_streak(cursor, user_id)
+        conexao.commit()
+        committed = True
+        
+        print(f'[LOGIN] ✓ Usuário {user_name} autenticado com sucesso!')
         return {
-            'id': resultado[0],
-            'name': resultado[1]
+            'id': user_id,
+            'name': user_name
         }
         
     except ValueError:
@@ -139,10 +152,76 @@ def autenticar_usuario(email: str, senha: str):
         raise Exception(f'Erro ao autenticar: {str(e)}')
     finally:
         try:
-            if cursor:
-                cursor.close()
             if conexao:
+                if not committed and conexao.closed == 0:
+                    conexao.rollback()
+                if cursor:
+                    cursor.close()
                 conexao.close()
                 print("[LOGIN] Conexão PostgreSQL fechada")
         except Exception as ex:
             print(f"[LOGIN] Erro ao fechar conexão: {ex}")
+
+def _atualizar_streak(cursor, user_id: int):
+    """
+    Atualiza o streak do usuário:
+    - Se logou no mesmo dia: sem mudanças
+    - Se é o dia seguinte ao último login: incrementa streak
+    - Se passou mais de um dia: reseta streak para 1
+    """
+    try:
+        # Busca sequencia e data_ultimo_login
+        cursor.execute(
+            'SELECT sequencia, data_ultimo_login FROM speech_teach.stats WHERE id_usuario = %s',
+            (user_id,)
+        )
+        row = cursor.fetchone()
+        
+        if not row:
+            # Usuário novo, cria stats com streak 1
+            return
+        
+        sequencia_atual = row[0] or 0
+        data_ultimo_login = row[1]
+
+        if data_ultimo_login is None:
+            # Normaliza contas antigas sem data de login registrada
+            nova_sequencia = max(sequencia_atual, 1)
+            cursor.execute(
+                'UPDATE speech_teach.stats SET sequencia = %s, data_ultimo_login = CURRENT_DATE WHERE id_usuario = %s',
+                (nova_sequencia, user_id)
+            )
+            print(f"[STREAK] Usuário {user_id}: inicializou streak {nova_sequencia} com data_ultimo_login de hoje")
+            return
+        
+        # Data de hoje
+        hoje = datetime.now().date()
+        
+        # Se já logou hoje, não faz nada
+        if data_ultimo_login == hoje:
+            print(f"[STREAK] Usuário {user_id}: já logou hoje, mantendo streak {sequencia_atual}")
+            return
+        
+        # Calcula a diferença de dias
+        dias_diferenca = (hoje - data_ultimo_login).days
+        
+        if dias_diferenca == 1:
+            # Logou no dia seguinte ao último: incrementa streak
+            nova_sequencia = sequencia_atual + 1
+            print(f"[STREAK] Usuário {user_id}: incrementou streak para {nova_sequencia}")
+        else:
+            # Passou mais de um dia: reseta para 1
+            nova_sequencia = 1
+            print(f"[STREAK] Usuário {user_id}: resetou streak para 1 (pulou {dias_diferenca} dias)")
+        
+        # Atualiza sequencia e data_ultimo_login
+        cursor.execute(
+            'UPDATE speech_teach.stats SET sequencia = %s, data_ultimo_login = CURRENT_DATE WHERE id_usuario = %s',
+            (nova_sequencia, user_id)
+        )
+
+        print(f'[STREAK] ✓ Usuário {user_id} atualizou streak no PostgreSQL! Streak atual: {nova_sequencia}, data_ultimo_login: {hoje}')
+
+
+    except Exception as e:
+        print(f"[STREAK] Erro ao atualizar streak: {e}")

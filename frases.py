@@ -5,21 +5,21 @@ from typing import List, Dict, Optional
 # Lista de todas as frases disponíveis no sistema
 # Mantém sincronizado com frontend/src/data/quotes.ts
 TODAS_FRASES = [
-    {'texto': 'We stick together.', 'dificuldade': 'easy', 'serie': 'Stranger Things'},
-    {'texto': 'The lights are flickering.', 'dificuldade': 'easy', 'serie': 'Stranger Things'},
-    {'texto': 'Something is wrong in Hawkins.', 'dificuldade': 'medium', 'serie': 'Stranger Things'},
-    {'texto': 'Stay away from the lab today.', 'dificuldade': 'medium', 'serie': 'Stranger Things'},
-    {'texto': "If we face the unknown together, we won't break.", 'dificuldade': 'hard', 'serie': 'Stranger Things'},
-    {'texto': 'Winter is coming.', 'dificuldade': 'easy', 'serie': 'Game of Thrones'},
-    {'texto': 'A dragon is rising.', 'dificuldade': 'easy', 'serie': 'Game of Thrones'},
-    {'texto': 'A Lannister always plays the game.', 'dificuldade': 'medium', 'serie': 'Game of Thrones'},
-    {'texto': 'The North remembers its friends.', 'dificuldade': 'medium', 'serie': 'Game of Thrones'},
-    {'texto': 'Power is a shadow; honor is the fire that guides me.', 'dificuldade': 'hard', 'serie': 'Game of Thrones'},
-    {'texto': 'Get the suit on.', 'dificuldade': 'easy', 'serie': 'How I Met Your Mother'},
-    {'texto': 'This is going to be epic.', 'dificuldade': 'easy', 'serie': 'How I Met Your Mother'},
-    {'texto': 'We met at that little bar.', 'dificuldade': 'medium', 'serie': 'How I Met Your Mother'},
-    {'texto': 'Sometimes timing changes everything.', 'dificuldade': 'medium', 'serie': 'How I Met Your Mother'},
-    {'texto': "One day, you'll see why every detour led me here.", 'dificuldade': 'hard', 'serie': 'How I Met Your Mother'},
+    {'id': 1, 'texto': 'We stick together.', 'dificuldade': 'easy', 'serie': 'Stranger Things'},
+    {'id': 2, 'texto': 'The lights are flickering.', 'dificuldade': 'easy', 'serie': 'Stranger Things'},
+    {'id': 3, 'texto': 'Something is wrong in Hawkins.', 'dificuldade': 'medium', 'serie': 'Stranger Things'},
+    {'id': 4, 'texto': 'Stay away from the lab today.', 'dificuldade': 'medium', 'serie': 'Stranger Things'},
+    {'id': 5, 'texto': "If we face the unknown together, we won't break.", 'dificuldade': 'hard', 'serie': 'Stranger Things'},
+    {'id': 6, 'texto': 'Winter is coming.', 'dificuldade': 'easy', 'serie': 'Game of Thrones'},
+    {'id': 7, 'texto': 'A dragon is rising.', 'dificuldade': 'easy', 'serie': 'Game of Thrones'},
+    {'id': 8, 'texto': 'A Lannister always plays the game.', 'dificuldade': 'medium', 'serie': 'Game of Thrones'},
+    {'id': 9, 'texto': 'The North remembers its friends.', 'dificuldade': 'medium', 'serie': 'Game of Thrones'},
+    {'id': 10, 'texto': 'Power is a shadow; honor is the fire that guides me.', 'dificuldade': 'hard', 'serie': 'Game of Thrones'},
+    {'id': 11, 'texto': 'Get the suit on.', 'dificuldade': 'easy', 'serie': 'How I Met Your Mother'},
+    {'id': 12, 'texto': 'This is going to be epic.', 'dificuldade': 'easy', 'serie': 'How I Met Your Mother'},
+    {'id': 13, 'texto': 'We met at that little bar.', 'dificuldade': 'medium', 'serie': 'How I Met Your Mother'},
+    {'id': 14, 'texto': 'Sometimes timing changes everything.', 'dificuldade': 'medium', 'serie': 'How I Met Your Mother'},
+    {'id': 15, 'texto': "One day, you'll see why every detour led me here.", 'dificuldade': 'hard', 'serie': 'How I Met Your Mother'},
 ]
 
 
@@ -45,10 +45,10 @@ def inicializar_frases_usuario(user_id: int) -> bool:
             cursor.execute(
                 '''
                 INSERT INTO speech_teach.frases 
-                (id_usuario, texto_frase, dificuldade, serie, estrelas, data_ultima_pratica)
-                VALUES (%s, %s, %s, %s, %s, NULL)
+                (id_frase, id_usuario, texto_frase, dificuldade, serie, estrelas, data_ultima_pratica)
+                VALUES (%s, %s, %s, %s, %s, %s, NULL)
                 ''',
-                (user_id, frase['texto'], frase['dificuldade'], frase['serie'], 0)
+                (frase['id'], user_id, frase['texto'], frase['dificuldade'], frase['serie'], 0)
             )
         
         conexao.commit()
@@ -195,9 +195,12 @@ def buscar_frases_usuario(user_id: int) -> List[Dict]:
             print(f"[FRASES] Erro ao fechar conexão: {e}")
 
 
-def atualizar_estrelas_frase(user_id: int, id_frase: int, estrelas: int) -> bool:
+def atualizar_frase(user_id: int, id_frase: int, estrelas: int, precisao: int) -> dict:
     """
-    Atualiza apenas as estrelas de uma frase já praticada.
+    Atualiza estrelas e melhor_precisao somente se o novo valor for maior ou inexistente.
+    Retorna um dicionário com:
+    - success: bool indicando se a operação foi bem-sucedida
+    - stars_earned: quantidade de estrelas que foram efetivamente adicionadas (diferença)
     """
     conexao = None
     cursor = None
@@ -210,26 +213,54 @@ def atualizar_estrelas_frase(user_id: int, id_frase: int, estrelas: int) -> bool
         
         conexao.autocommit = False
         cursor = conexao.cursor()
-        
+
+        # Bloqueia a linha para comparar os valores atuais antes de atualizar
+        cursor.execute(
+            '''
+            SELECT estrelas, melhor_precisao
+            FROM speech_teach.frases
+            WHERE id_usuario = %s AND id_frase = %s
+            FOR UPDATE
+            ''',
+            (user_id, id_frase)
+        )
+        row = cursor.fetchone()
+        if not row:
+            return {"success": False, "stars_earned": 0}  # Frase não encontrada
+
+        estrelas_atual, melhor_precisao_atual = row
+        estrelas_atual = estrelas_atual or 0
+        deve_atualizar_estrelas = estrelas > estrelas_atual
+        deve_atualizar_precisao = melhor_precisao_atual is None or precisao > melhor_precisao_atual
+
+        # Calcula quantas estrelas foram realmente conquistadas (a diferença)
+        stars_earned = max(0, estrelas - estrelas_atual)
+
+        # Nenhuma melhoria: confirma transação e retorna
+        if not (deve_atualizar_estrelas or deve_atualizar_precisao):
+            conexao.commit()
+            committed = True
+            return {"success": True, "stars_earned": 0}
+
+        novas_estrelas = estrelas if deve_atualizar_estrelas else estrelas_atual
+        nova_melhor_precisao = precisao if deve_atualizar_precisao else melhor_precisao_atual
+
         cursor.execute(
             '''
             UPDATE speech_teach.frases 
-            SET estrelas = %s, data_ultima_pratica = CURRENT_TIMESTAMP
+            SET estrelas = %s, melhor_precisao = %s, data_ultima_pratica = CURRENT_TIMESTAMP
             WHERE id_usuario = %s AND id_frase = %s
             ''',
-            (estrelas, user_id, id_frase)
+            (novas_estrelas, nova_melhor_precisao, user_id, id_frase)
         )
-        
-        if cursor.rowcount == 0:
-            return False  # Frase não encontrada
         
         conexao.commit()
         committed = True
-        return True
+        return {"success": True, "stars_earned": stars_earned}
         
     except Exception as e:
         print(f"[FRASES] Erro ao atualizar estrelas: {e}")
-        return False
+        return {"success": False, "stars_earned": 0}
         
     finally:
         try:

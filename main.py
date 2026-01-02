@@ -5,8 +5,8 @@ from typing import Dict, Optional
 import uuid
 from voice_chat import handle_voice_upload
 from cadastro import cadastrar_usuario, autenticar_usuario
-from stats import incrementar_estrelas, obter_estrelas
-from frases import salvar_frase, buscar_frases_usuario, inicializar_frases_usuario
+from stats import incrementar_estrelas, obter_estrelas, obter_stats_completas, atualizar_precisao_media, atualizar_melhor_precisao
+from frases import atualizar_frase, buscar_frases_usuario, inicializar_frases_usuario
 
 app = FastAPI(title="SpeechTeach API", version="0.1.0")
 
@@ -38,12 +38,11 @@ class UserPublic(BaseModel):
 
 class Stats(BaseModel):
     user_id: str
-    level: int = 1
-    xp: int = 0
     accuracy: float = 0.0
     phrases: int = 0
     streak: int = 0
     stars: int = 0
+    bestAccuracy: float = 0.0
 
 class ChatMessage(BaseModel):
     prompt: str
@@ -81,6 +80,11 @@ async def login(payload: LoginPayload):
             USERS[user_id] = {"id": user_id, "name": user_data['name']}
         if user_id not in STATS:
             STATS[user_id] = Stats(user_id=user_id).dict()
+        
+        # Atualiza a precisão média ao fazer login
+        atualizar_precisao_media(int(user_id))
+        atualizar_melhor_precisao(int(user_id))
+        
         return {"id": user_id, "name": user_data['name']}
     except ValueError as e:
         # Credenciais inválidas
@@ -99,21 +103,16 @@ async def get_user(user_id: str):
 @app.get("/api/stats/{user_id}", response_model=Stats)
 async def get_stats(user_id: str):
     try:
-        # Busca as stats do banco de dados
-        stars = obter_estrelas(int(user_id))
-        # Retorna as stats, priorizando dados do banco
-        if user_id in STATS:
-            STATS[user_id]["stars"] = stars
-            return STATS[user_id]
-        # Se não existir em memória, cria um novo registro com stars do banco
+        # Busca as stats completas do banco de dados
+        stats_data = obter_stats_completas(int(user_id))
+        
         return {
             "user_id": user_id,
-            "level": 1,
-            "xp": 0,
-            "accuracy": 0.0,
-            "phrases": 0,
-            "streak": 0,
-            "stars": stars
+            "accuracy": stats_data["accuracy"],
+            "phrases": stats_data["phrases"],
+            "streak": stats_data["streak"],
+            "stars": stats_data["stars"],
+            "bestAccuracy": stats_data["bestAccuracy"]
         }
     except Exception as e:
         print(f"[API] Erro ao obter stats: {e}")
@@ -123,8 +122,6 @@ async def get_stats(user_id: str):
         return data
 
 class StatsUpdate(BaseModel):
-    level: Optional[int] = None
-    xp: Optional[int] = None
     accuracy: Optional[float] = None
     phrases: Optional[int] = None
     streak: Optional[int] = None
@@ -164,28 +161,63 @@ async def update_stars(user_id: str, payload: StarsPayload):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/api/stats/{user_id}/sync-accuracy")
+async def sync_accuracy(user_id: str):
+    """Sincroniza a precisão média do usuário e retorna o valor atualizado"""
+    try:
+        # Atualiza a precisão média no banco
+        atualizar_precisao_media(int(user_id))
+        
+        # Busca as stats atualizadas
+        stats_data = obter_stats_completas(int(user_id))
+        
+        return {
+            "ok": True,
+            "accuracy": stats_data["accuracy"]
+        }
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid user_id")
+    except Exception as e:
+        print(f"[API] Erro ao sincronizar precisão: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 class FrasePayload(BaseModel):
     id_frase: int
     texto_frase: str
     dificuldade: str
     serie: str
     estrelas: int
+    precisao: int
 
 @app.post("/api/frases/salvar")
 async def salvar_frase_praticada(user_id: str, payload: FrasePayload):
-    """Salva ou atualiza uma frase praticada pelo usuário"""
+    """Salva ou atualiza uma frase praticada pelo usuário, e adiciona apenas a diferença de estrelas"""
     try:
-        ok = salvar_frase(
+        # Atualiza a frase e obtém a quantidade de estrelas efetivamente conquistadas
+        result = atualizar_frase(
             user_id=int(user_id),
             id_frase=payload.id_frase,
-            texto_frase=payload.texto_frase,
-            dificuldade=payload.dificuldade,
-            serie=payload.serie,
-            estrelas=payload.estrelas
+            estrelas=payload.estrelas,
+            precisao=payload.precisao
         )
-        if not ok:
+        
+        if not result.get("success"):
             raise HTTPException(status_code=500, detail="Failed to save phrase")
-        return {"ok": True}
+        
+        # Incrementa apenas a diferença de estrelas conquistadas
+        stars_earned = result.get("stars_earned", 0)
+        if stars_earned > 0:
+            ok = incrementar_estrelas(int(user_id), stars_earned)
+            if not ok:
+                raise HTTPException(status_code=500, detail="Failed to update stars")
+        
+        # Atualiza a precisão média do usuário
+        atualizar_precisao_media(int(user_id))
+        
+        # Atualiza a melhor precisão do usuário
+        atualizar_melhor_precisao(int(user_id))
+        
+        return {"ok": True, "stars_earned": stars_earned}
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid user_id")
     except Exception as e:
