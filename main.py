@@ -1,5 +1,6 @@
 from fastapi import FastAPI, HTTPException, File, UploadFile, Form
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import Dict, Optional
 import uuid
@@ -7,6 +8,7 @@ from voice_chat import handle_voice_upload
 from cadastro import cadastrar_usuario, autenticar_usuario
 from stats import incrementar_estrelas, obter_estrelas, obter_stats_completas, atualizar_precisao_media, atualizar_melhor_precisao
 from frases import atualizar_frase, buscar_frases_usuario, inicializar_frases_usuario
+from ms_speech import sintetizar_frase
 
 app = FastAPI(title="SpeechTeach API", version="0.1.0")
 
@@ -257,4 +259,34 @@ async def analyze_pronunciation(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error processing audio: {str(e)}")
+
+
+@app.get("/api/synthesize-speech")
+async def synthesize_speech(text: str):
+    """
+    Sintetiza um texto em áudio usando Azure Text-to-Speech.
+    
+    Args:
+        text: Texto a ser convertido em áudio
+        
+    Returns:
+        StreamingResponse com áudio em formato WAV
+    """
+    try:
+        if not text or not text.strip():
+            raise HTTPException(status_code=400, detail="Texto vazio")
+        
+        # Sintetiza o texto
+        audio_data = sintetizar_frase(text.strip())
+        
+        # Retorna o áudio como stream
+        return StreamingResponse(
+            iter([audio_data]),
+            media_type="audio/wav",
+            headers={"Content-Disposition": "inline; filename=audio.wav"}
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error synthesizing speech: {str(e)}")
 

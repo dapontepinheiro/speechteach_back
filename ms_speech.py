@@ -1,5 +1,6 @@
 # ms_speech.py
 import os
+import io
 import azure.cognitiveservices.speech as speechsdk
 
 try:
@@ -69,3 +70,36 @@ def avaliar_pronuncia(audio_path: str, reference_text: str) -> dict:
     }
 
     return data
+
+
+def sintetizar_frase(texto: str) -> bytes:
+    """
+    Converte texto em áudio usando Azure Text-to-Speech.
+    
+    Args:
+        texto: Texto a ser convertido em áudio
+        
+    Returns:
+        bytes: Dados de áudio em formato WAV
+    """
+    speech_config = _get_speech_config()
+    
+    # Configura para não usar speaker (áudio será retornado em memória)
+    # Quando audio_config é None, o SDK retorna o áudio em result.audio_data
+    audio_config = None
+    
+    # Cria o sintetizador de fala
+    synthesizer = speechsdk.SpeechSynthesizer(
+        speech_config=speech_config,
+        audio_config=audio_config
+    )
+    
+    # Sintetiza o texto
+    result = synthesizer.speak_text_async(texto).get()
+    
+    # Verifica se houve erro
+    if result.reason == speechsdk.ResultReason.SynthesizingAudioCompleted:
+        return result.audio_data
+    else:
+        error_msg = f"Erro ao sintetizar fala: {result.error_details}" if result.error_details else "Erro desconhecido"
+        raise RuntimeError(error_msg)
