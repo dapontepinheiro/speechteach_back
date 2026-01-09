@@ -6,6 +6,8 @@ mysql-connector-python==9.1.0  # Conector MySQL usado em cadastro.py
 pydub==0.25.1  # Conversão de áudio para formato WAV
 azure-cognitiveservices-speech  # Azure Speech SDK para avaliação de pronúncia
 python-dotenv>=1.0.0  # Carregar variáveis de ambiente de um arquivo .env
+bcrypt==4.1.1  # Hash seguro de senhas
+python-jose[cryptography]==3.3.0  # JWT (JSON Web Tokens) para autenticação
 
 # Dependências opcionais (descomente se quiser utilizar/tests)
 # httpx==0.27.2  # Cliente HTTP para chamadas externas / testes

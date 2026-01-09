@@ -1,6 +1,7 @@
 import os
 from datetime import datetime, timedelta
 import psycopg2
+import bcrypt
 
 try:
     from dotenv import load_dotenv
@@ -20,7 +21,6 @@ def conectar():
         return None
     
 def verificar_usuario(email: str):
-    """Verifica se um usuário já existe no banco de dados"""
     try:
         conexao = conectar()
         if conexao is None:
@@ -60,9 +60,15 @@ def cadastrar_usuario(user: str, email: str, senha: str):
         conexao.autocommit = False
         cursor = conexao.cursor()
         
+        # Hash da senha com bcrypt (12 rounds de salt)
+        senha_limpa = (senha or '').strip()
+        if not senha_limpa:
+            raise ValueError('Senha não pode estar vazia')
+        senha_hash = bcrypt.hashpw(senha_limpa.encode('utf-8'), bcrypt.gensalt(rounds=12)).decode('utf-8')
+        
         # Cria o usuário e devolve o id gerado
         comando_usuario = 'INSERT INTO speech_teach.usuarios (nome, email, senha) VALUES (%s, %s, %s) RETURNING id'
-        valores_usuario = (user.strip(), email.strip(), (senha or '').strip())
+        valores_usuario = (user.strip(), email.strip(), senha_hash)
         print(f"[CADASTRO] Executando INSERT para: {user.strip()}")
         cursor.execute(comando_usuario, valores_usuario)
         user_id = cursor.fetchone()[0]
@@ -101,12 +107,6 @@ def cadastrar_usuario(user: str, email: str, senha: str):
             print(f"[CADASTRO] Erro ao fechar conexão: {ex}")
 
 def autenticar_usuario(email: str, senha: str):
-    """
-    Autentica um usuário pelo email e senha.
-    Atualiza o streak de acordo com a última data de login.
-    Retorna um dicionário com id e name se sucesso.
-    Levanta ValueError se credenciais inválidas.
-    """
     conexao = None
     cursor = None
     committed = False
@@ -128,13 +128,19 @@ def autenticar_usuario(email: str, senha: str):
         if not resultado:
             raise ValueError('Email não encontrado')
         
-        if resultado[2] != (senha or '').strip():
-            raise ValueError('Senha incorreta')
-        
+        # Verifica a senha com bcrypt
         user_id = resultado[0]
         user_name = resultado[1]
+        senha_hash_bd = resultado[2]
         
-        # Atualiza o streak
+        try:
+            if not bcrypt.checkpw((senha or '').encode('utf-8'), senha_hash_bd.encode('utf-8')):
+                raise ValueError('Senha incorreta')
+        except ValueError:
+            raise
+        except Exception:
+            raise ValueError('Senha incorreta')
+        
         _atualizar_streak(cursor, user_id)
         conexao.commit()
         committed = True
@@ -163,14 +169,7 @@ def autenticar_usuario(email: str, senha: str):
             print(f"[LOGIN] Erro ao fechar conexão: {ex}")
 
 def _atualizar_streak(cursor, user_id: int):
-    """
-    Atualiza o streak do usuário:
-    - Se logou no mesmo dia: sem mudanças
-    - Se é o dia seguinte ao último login: incrementa streak
-    - Se passou mais de um dia: reseta streak para 1
-    """
     try:
-        # Busca sequencia e data_ultimo_login
         cursor.execute(
             'SELECT sequencia, data_ultimo_login FROM speech_teach.stats WHERE id_usuario = %s',
             (user_id,)
@@ -185,7 +184,6 @@ def _atualizar_streak(cursor, user_id: int):
         data_ultimo_login = row[1]
 
         if data_ultimo_login is None:
-            # Normaliza contas antigas sem data de login registrada
             nova_sequencia = max(sequencia_atual, 1)
             cursor.execute(
                 'UPDATE speech_teach.stats SET sequencia = %s, data_ultimo_login = CURRENT_DATE WHERE id_usuario = %s',
@@ -194,27 +192,21 @@ def _atualizar_streak(cursor, user_id: int):
             print(f"[STREAK] Usuário {user_id}: inicializou streak {nova_sequencia} com data_ultimo_login de hoje")
             return
         
-        # Data de hoje
         hoje = datetime.now().date()
         
-        # Se já logou hoje, não faz nada
         if data_ultimo_login == hoje:
             print(f"[STREAK] Usuário {user_id}: já logou hoje, mantendo streak {sequencia_atual}")
             return
         
-        # Calcula a diferença de dias
         dias_diferenca = (hoje - data_ultimo_login).days
         
         if dias_diferenca == 1:
-            # Logou no dia seguinte ao último: incrementa streak
             nova_sequencia = sequencia_atual + 1
             print(f"[STREAK] Usuário {user_id}: incrementou streak para {nova_sequencia}")
         else:
-            # Passou mais de um dia: reseta para 1
             nova_sequencia = 1
             print(f"[STREAK] Usuário {user_id}: resetou streak para 1 (pulou {dias_diferenca} dias)")
         
-        # Atualiza sequencia e data_ultimo_login
         cursor.execute(
             'UPDATE speech_teach.stats SET sequencia = %s, data_ultimo_login = CURRENT_DATE WHERE id_usuario = %s',
             (nova_sequencia, user_id)
