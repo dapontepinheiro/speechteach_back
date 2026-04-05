@@ -101,7 +101,6 @@ class VoiceProcessor:
             from pydub import AudioSegment
             AudioSegment.converter = ffmpeg_executable
             AudioSegment.ffmpeg = ffmpeg_executable
-
             print(f'Convertendo áudio: {input_path}')
             audio = AudioSegment.from_file(input_path)
             

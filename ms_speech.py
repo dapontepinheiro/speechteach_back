@@ -22,7 +22,6 @@ def avaliar_pronuncia(audio_path: str, reference_text: str) -> dict:
     def _score_or_zero(obj, attr_name: str) -> float:
         value = getattr(obj, attr_name, None)
         return float(value) if isinstance(value, (int, float)) else 0.0
-
     # Reconhecimento livre para capturar exatamente o que foi dito
     free_audio_config = speechsdk.AudioConfig(filename=audio_path)
     free_recognizer = speechsdk.SpeechRecognizer(
@@ -71,7 +70,6 @@ def avaliar_pronuncia(audio_path: str, reference_text: str) -> dict:
             "words": [],
             "error": error_detail,
         }
-
     pron_result = speechsdk.PronunciationAssessmentResult(result)
 
     # Retorna o texto reconhecido livre; se vazio, usa o da avaliação
