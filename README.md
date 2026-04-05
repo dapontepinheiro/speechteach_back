@@ -18,11 +18,17 @@ conteúdo de estudo.
 
 ## Estrutura
 ├── main.py           # entrada da aplicação e rotas principais
+
 ├── cadastro.py       # autenticação e gerenciamento de usuários
+
 ├── frases.py         # banco de frases e lógica de níveis/séries
+
 ├── ms_speech.py      # integração com Microsoft Azure Speech SDK
+
 ├── voice_chat.py     # processamento do áudio enviado pelo usuário
+
 ├── stats.py          # cálculo de streak, estrelas e estatísticas
+
 └── requirements.txt
 ## Tecnologias
 
