@@ -1,0 +1,8 @@
+azure-cognitiveservices-speech==1.42.0
+fastapi==0.135.3
+psycopg2==2.9.11
+pydantic==2.12.5
+pydub==0.25.1
+python-dotenv==1.2.2
+bcrypt==4.2.1
+python-jose==3.3.0
